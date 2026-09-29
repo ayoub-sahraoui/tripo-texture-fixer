@@ -1,0 +1,89 @@
+@layer reset, base, tokens, recipes, utilities;
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+*, html, body, button, input, select, textarea, kbd {
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+}
+
+body, html, #root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background-color: #09090b;
+  color: #f4f4f5;
+}
+
+/* Custom minimal scrollbar */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: #121215;
+}
+::-webkit-scrollbar-thumb {
+  background: #27272a;
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #52525b;
+}
+
+/* Park UI Splitter styling */
+[data-scope="splitter"][data-part="root"] {
+  display: flex !important;
+  flex-direction: row !important;
+  width: 100% !important;
+  height: 100% !important;
+  overflow: hidden !important;
+}
+
+[data-scope="splitter"][data-part="panel"] {
+  position: relative !important;
+  height: 100% !important;
+  width: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+  min-height: 0 !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+}
+
+[data-scope="splitter"][data-part="resize-trigger"] {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 6px;
+  background-color: #141417;
+  cursor: col-resize;
+  transition: background-color 0.15s ease;
+  z-index: 20;
+  border-left: 1px solid #27272a;
+  border-right: 1px solid #27272a;
+  flex-shrink: 0;
+}
+
+[data-scope="splitter"][data-part="resize-trigger"]:hover {
+  background-color: #3f3f46;
+}
+
+/* Checkerboard pattern for texture transparency */
+.bg-checkerboard {
+  background-color: #18181b;
+  background-image:
+    linear-gradient(45deg, #121215 25%, transparent 25%),
+    linear-gradient(-45deg, #121215 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #121215 75%),
+    linear-gradient(-45deg, transparent 75%, #121215 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
+}
