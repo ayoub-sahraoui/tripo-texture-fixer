@@ -21,18 +21,18 @@ FROM nginx:alpine AS runner
 # Remove default nginx static assets
 RUN rm -rf /usr/share/nginx/html/*
 
-# Copy custom Nginx configuration with gzip & SPA routing
+# Copy custom Nginx configuration with dual-port support (80 and 3000), gzip & SPA routing
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 # Copy build artifacts from builder stage
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# Expose port 80
-EXPOSE 80
+# Expose both 80 and 3000 for seamless Coolify / Traefik proxy compatibility
+EXPOSE 80 3000
 
-# Container healthcheck
-HEALTHCHECK --interval=30s --timeout=3s \
-  CMD wget --quiet --tries=1 --spider http://localhost/ || exit 1
+# Container healthcheck (verifies both port 80 and 3000 with low startup grace period)
+HEALTHCHECK --interval=10s --timeout=3s --start-period=3s --retries=3 \
+  CMD wget --quiet --tries=1 --spider http://127.0.0.1:80/healthz || wget --quiet --tries=1 --spider http://127.0.0.1:3000/healthz || exit 1
 
 # Start nginx in foreground
 CMD ["nginx", "-g", "daemon off;"]
