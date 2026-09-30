@@ -347,3 +347,90 @@ export function createIslandBoundaryPath2D(
   return boundaryPath;
 }
 
+export function findTriangleAtUV(
+  u: number,
+  v: number,
+  analysis: UVAnalysis
+): UVTriangle | null {
+  for (const tri of analysis.triangles) {
+    if (isPointInTriangle(u, v, tri)) {
+      return tri;
+    }
+  }
+  return null;
+}
+
+export function createFacesPath2D(
+  faceIndices: number[],
+  triangles: UVTriangle[],
+  width: number,
+  height: number
+): Path2D {
+  const path = new Path2D();
+  for (const tIdx of faceIndices) {
+    const tri = triangles[tIdx];
+    if (!tri) continue;
+    const x0 = tri.uvs[0].u * width;
+    const y0 = (1 - tri.uvs[0].v) * height;
+    const x1 = tri.uvs[1].u * width;
+    const y1 = (1 - tri.uvs[1].v) * height;
+    const x2 = tri.uvs[2].u * width;
+    const y2 = (1 - tri.uvs[2].v) * height;
+
+    path.moveTo(x0, y0);
+    path.lineTo(x1, y1);
+    path.lineTo(x2, y2);
+    path.closePath();
+  }
+  return path;
+}
+
+export function createFacesBoundaryPath2D(
+  faceIndices: number[],
+  triangles: UVTriangle[],
+  width: number,
+  height: number
+): Path2D {
+  const edgeCount = new Map<
+    string,
+    { x0: number; y0: number; x1: number; y1: number; count: number }
+  >();
+
+  for (const tIdx of faceIndices) {
+    const tri = triangles[tIdx];
+    if (!tri) continue;
+    const pts = tri.uvs;
+    const pairs: [UVPoint, UVPoint][] = [
+      [pts[0], pts[1]],
+      [pts[1], pts[2]],
+      [pts[2], pts[0]],
+    ];
+    for (const [pA, pB] of pairs) {
+      const kA = coordKey(pA.u, pA.v);
+      const kB = coordKey(pB.u, pB.v);
+      const key = kA < kB ? `${kA}|${kB}` : `${kB}|${kA}`;
+      const existing = edgeCount.get(key);
+      if (existing) {
+        existing.count++;
+      } else {
+        edgeCount.set(key, {
+          x0: pA.u * width,
+          y0: (1 - pA.v) * height,
+          x1: pB.u * width,
+          y1: (1 - pB.v) * height,
+          count: 1,
+        });
+      }
+    }
+  }
+
+  const boundaryPath = new Path2D();
+  for (const edge of edgeCount.values()) {
+    if (edge.count === 1) {
+      boundaryPath.moveTo(edge.x0, edge.y0);
+      boundaryPath.lineTo(edge.x1, edge.y1);
+    }
+  }
+  return boundaryPath;
+}
+

@@ -5,12 +5,16 @@ import {
   UVIsland,
   UVPoint,
   ModelData,
+  PaintConstraintMode,
 } from '../../core/types';
 import { PaintEngine } from '../../core/paintEngine';
 import {
   findIslandAtUV,
+  findTriangleAtUV,
   createIslandPath2D,
   createIslandBoundaryPath2D,
+  createFacesPath2D,
+  createFacesBoundaryPath2D,
   renderWireframe,
 } from '../../core/uvAnalyzer';
 import { ZoomIn, ZoomOut, Maximize, RotateCcw, Layers } from 'lucide-react';
@@ -21,8 +25,11 @@ interface UVEditorCanvasProps {
   paintEngine: PaintEngine | null;
   activeTool: ToolType;
   brushSettings: BrushSettings;
+  paintConstraintMode: PaintConstraintMode;
   selectedIsland: UVIsland | null;
   onSelectIsland: (island: UVIsland | null) => void;
+  selectedFaces?: number[];
+  onSelectFace?: (faceIndex: number, multiSelect?: boolean) => void;
   showWireframe: boolean;
   onToggleWireframe?: () => void;
   wireframeOpacity: number;
@@ -40,8 +47,11 @@ export const UVEditorCanvas: React.FC<UVEditorCanvasProps> = ({
   paintEngine,
   activeTool,
   brushSettings,
+  paintConstraintMode,
   selectedIsland,
   onSelectIsland,
+  selectedFaces = [],
+  onSelectFace,
   showWireframe,
   onToggleWireframe,
   wireframeOpacity,
@@ -160,8 +170,8 @@ export const UVEditorCanvas: React.FC<UVEditorCanvasProps> = ({
       ctx.restore();
     }
 
-    // 2. Draw Selected Island Highlight & Mask boundary
-    if (selectedIsland) {
+    // 2. Selection Highlight & Mask boundary: ONLY rendered when NOT in Free mode
+    if (paintConstraintMode === 'islands' && selectedIsland) {
       const path = createIslandPath2D(
         selectedIsland,
         modelData.uvAnalysis.triangles,
@@ -170,25 +180,58 @@ export const UVEditorCanvas: React.FC<UVEditorCanvasProps> = ({
       );
 
       ctx.save();
-      // Translucent white fill highlight
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.18)';
+      // Translucent white fill highlight modulated by wireframeOpacity
+      const fillAlpha = Math.max(0.04, Math.min(0.35, wireframeOpacity * 0.35));
+      ctx.fillStyle = `rgba(255, 255, 255, ${fillAlpha})`;
       ctx.fill(path);
 
-      // Selected island UV wireframe lines (crisp pure white, exact wireframeLineWidth)
-      ctx.strokeStyle = '#ffffff';
+      // Selected island UV wireframe lines modulated by wireframeOpacity
+      ctx.strokeStyle = `rgba(255, 255, 255, ${wireframeOpacity})`;
       ctx.lineWidth = wireframeLineWidth;
       ctx.lineJoin = 'round';
       ctx.lineCap = 'round';
       ctx.stroke(path);
 
-      // Distinct outer perimeter boundary contour (scales in lockstep with wireframeLineWidth)
+      // Distinct outer perimeter boundary contour (scales with wireframeLineWidth and wireframeOpacity)
       const boundaryPath = createIslandBoundaryPath2D(
         selectedIsland,
         modelData.uvAnalysis.triangles,
         w,
         h
       );
-      ctx.strokeStyle = '#ffffff';
+      ctx.strokeStyle = `rgba(255, 255, 255, ${Math.min(1.0, Math.max(0.3, wireframeOpacity * 1.3))})`;
+      ctx.lineWidth = Math.max(wireframeLineWidth * 1.5, wireframeLineWidth + 0.75);
+      ctx.stroke(boundaryPath);
+      ctx.restore();
+    } else if (paintConstraintMode === 'faces' && selectedFaces && selectedFaces.length > 0) {
+      const path = createFacesPath2D(
+        selectedFaces,
+        modelData.uvAnalysis.triangles,
+        w,
+        h
+      );
+
+      ctx.save();
+      // Translucent white fill highlight modulated by wireframeOpacity
+      const fillAlpha = Math.max(0.05, Math.min(0.4, wireframeOpacity * 0.4));
+      ctx.fillStyle = `rgba(255, 255, 255, ${fillAlpha})`;
+      ctx.fill(path);
+
+      // Selected faces UV wireframe lines modulated by wireframeOpacity
+      ctx.strokeStyle = `rgba(255, 255, 255, ${wireframeOpacity})`;
+      ctx.lineWidth = wireframeLineWidth;
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.stroke(path);
+
+      // Boundary contour of selected faces
+      const boundaryPath = createFacesBoundaryPath2D(
+        selectedFaces,
+        modelData.uvAnalysis.triangles,
+        w,
+        h
+      );
+      ctx.strokeStyle = `rgba(255, 255, 255, ${Math.min(1.0, Math.max(0.3, wireframeOpacity * 1.3))})`;
       ctx.lineWidth = Math.max(wireframeLineWidth * 1.5, wireframeLineWidth + 0.75);
       ctx.stroke(boundaryPath);
       ctx.restore();
@@ -214,16 +257,27 @@ export const UVEditorCanvas: React.FC<UVEditorCanvasProps> = ({
     modelData,
     showWireframe,
     wireframeOpacity,
+    paintConstraintMode,
     selectedIsland,
+    selectedFaces,
     wireframeLineWidth,
     activeTool,
     brushSettings.cloneSource,
   ]);
 
+  // Subscribe to PaintEngine output updates (Undo, Redo, Filters, Clear, etc.)
   useEffect(() => {
+    if (!paintEngine) return;
+    const unsubscribe = paintEngine.subscribe(() => {
+      renderMainCanvas();
+    });
     renderMainCanvas();
+    return unsubscribe;
+  }, [paintEngine, renderMainCanvas]);
+
+  useEffect(() => {
     renderOverlay();
-  }, [renderMainCanvas, renderOverlay]);
+  }, [renderOverlay]);
 
   // Re-render wireframe canvas whenever line thickness changes
   useEffect(() => {
@@ -370,8 +424,15 @@ export const UVEditorCanvas: React.FC<UVEditorCanvasProps> = ({
       if (coords.x >= 0 && coords.x < w && coords.y >= 0 && coords.y < h) {
         const u = coords.x / w;
         const v = 1 - coords.y / h;
-        const island = findIslandAtUV(u, v, modelData.uvAnalysis);
-        onSelectIsland(island);
+        if (paintConstraintMode === 'faces') {
+          const tri = findTriangleAtUV(u, v, modelData.uvAnalysis);
+          if (tri) {
+            onSelectFace?.(tri.triangleIndex, e.shiftKey);
+          }
+        } else if (paintConstraintMode === 'islands') {
+          const island = findIslandAtUV(u, v, modelData.uvAnalysis);
+          onSelectIsland(island);
+        }
       }
       return;
     }
@@ -504,6 +565,7 @@ export const UVEditorCanvas: React.FC<UVEditorCanvasProps> = ({
 
   const handleDoubleClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!paintEngine || !modelData) return;
+    if (paintConstraintMode === 'free') return; // Selection makes no sense in free mode
     const coords = screenToCanvas(e.clientX, e.clientY);
     if (!coords) return;
     const w = paintEngine.getWidth();
@@ -511,8 +573,15 @@ export const UVEditorCanvas: React.FC<UVEditorCanvasProps> = ({
     if (coords.x >= 0 && coords.x < w && coords.y >= 0 && coords.y < h) {
       const u = coords.x / w;
       const v = 1 - coords.y / h;
-      const island = findIslandAtUV(u, v, modelData.uvAnalysis);
-      onSelectIsland(island);
+      if (paintConstraintMode === 'faces') {
+        const tri = findTriangleAtUV(u, v, modelData.uvAnalysis);
+        if (tri) {
+          onSelectFace?.(tri.triangleIndex, e.shiftKey);
+        }
+      } else if (paintConstraintMode === 'islands') {
+        const island = findIslandAtUV(u, v, modelData.uvAnalysis);
+        onSelectIsland(island);
+      }
     }
   };
 

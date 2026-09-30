@@ -21,7 +21,7 @@ import {
   Flame,
   Sparkles,
 } from 'lucide-react';
-import { ToolType, UVIsland, BrushSettings } from '../../core/types';
+import { ToolType, UVIsland, BrushSettings, PaintConstraintMode } from '../../core/types';
 import { Button, IconButton, Badge, Tooltip } from '@/components/ui';
 
 interface HeaderBarProps {
@@ -38,8 +38,10 @@ interface HeaderBarProps {
   onClearPaint: () => void;
   selectedIsland: UVIsland | null;
   onClearSelectedIsland: () => void;
-  paintConstraintMode: 'free' | 'selection';
-  onChangePaintConstraintMode: (mode: 'free' | 'selection') => void;
+  selectedFaces?: number[];
+  onClearSelectedFaces?: () => void;
+  paintConstraintMode: PaintConstraintMode;
+  onChangePaintConstraintMode: (mode: PaintConstraintMode) => void;
   showWireframe?: boolean;
   onToggleWireframe?: () => void;
   onLoadModelFile: (file: File) => void;
@@ -61,6 +63,8 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   onClearPaint,
   selectedIsland,
   onClearSelectedIsland,
+  selectedFaces = [],
+  onClearSelectedFaces,
   paintConstraintMode,
   onChangePaintConstraintMode,
   showWireframe = true,
@@ -318,18 +322,18 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
           </Tooltip>
         </div>
 
-        {/* Paint Mode: Free vs On Selection (Responsive) */}
+        {/* Paint Mode: Free vs Islands vs Faces (Responsive) */}
         {modelLoaded && (
           <div className="flex items-center">
             {/* Desktop Segmented Toggle */}
             <div className="hidden sm:flex items-center bg-zinc-900 border border-zinc-800 rounded p-0.5 text-xs">
-              <Tooltip content="Free paint mode without boundaries" shortcut="M">
+              <Tooltip content="Free paint mode on any mesh region without boundaries" shortcut="M">
                 <button
                   type="button"
                   onClick={() => onChangePaintConstraintMode('free')}
                   className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors ${
                     paintConstraintMode === 'free'
-                      ? 'bg-zinc-800 text-zinc-100 shadow-sm border border-zinc-600'
+                      ? 'bg-zinc-800 text-zinc-100 shadow-sm border border-zinc-600 font-semibold'
                       : 'text-zinc-400 hover:text-zinc-200'
                   }`}
                 >
@@ -346,15 +350,36 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
               >
                 <button
                   type="button"
-                  onClick={() => onChangePaintConstraintMode('selection')}
+                  onClick={() => onChangePaintConstraintMode('islands')}
                   className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors flex items-center gap-1 ${
-                    paintConstraintMode === 'selection'
-                      ? 'bg-zinc-800 text-zinc-100 shadow-sm border border-zinc-600'
+                    paintConstraintMode === 'islands'
+                      ? 'bg-zinc-800 text-zinc-100 shadow-sm border border-zinc-600 font-semibold'
                       : 'text-zinc-400 hover:text-zinc-200'
                   }`}
                 >
                   <Lock className="w-3 h-3" />
-                  <span>Selection</span>
+                  <span>Islands</span>
+                </button>
+              </Tooltip>
+              <Tooltip
+                content={
+                  selectedFaces && selectedFaces.length > 0
+                    ? `Constrain strokes to ${selectedFaces.length} selected face(s)`
+                    : "Constrain strokes to selected mesh faces"
+                }
+                shortcut="M"
+              >
+                <button
+                  type="button"
+                  onClick={() => onChangePaintConstraintMode('faces')}
+                  className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors flex items-center gap-1 ${
+                    paintConstraintMode === 'faces'
+                      ? 'bg-zinc-800 text-zinc-100 shadow-sm border border-zinc-600 font-semibold'
+                      : 'text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  <Box className="w-3 h-3" />
+                  <span>Faces</span>
                 </button>
               </Tooltip>
             </div>
@@ -362,44 +387,64 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
             {/* Mobile / Narrow Screen Single Toggle Icon */}
             <div className="sm:hidden">
               <Tooltip
-                content={paintConstraintMode === 'selection' ? 'Switch to Free Paint' : 'Switch to Island Constraint'}
+                content={`Mode: ${paintConstraintMode.toUpperCase()} (Click to cycle)`}
                 shortcut="M"
               >
                 <IconButton
                   size="xs"
                   variant="ghost"
-                  onClick={() => onChangePaintConstraintMode(paintConstraintMode === 'selection' ? 'free' : 'selection')}
+                  onClick={() => {
+                    const nextMode =
+                      paintConstraintMode === 'free'
+                        ? 'islands'
+                        : paintConstraintMode === 'islands'
+                        ? 'faces'
+                        : 'free';
+                    onChangePaintConstraintMode(nextMode);
+                  }}
                   aria-label="Toggle Paint Mode"
-                  className={`h-7 w-7 border ${
-                    paintConstraintMode === 'selection'
-                      ? 'bg-zinc-800 text-zinc-100 border-zinc-600'
-                      : 'text-zinc-400 border-zinc-800'
-                  }`}
+                  className="h-7 w-7 border bg-zinc-800 text-zinc-100 border-zinc-600"
                 >
-                  <Lock className="w-3.5 h-3.5" />
+                  {paintConstraintMode === 'free' ? (
+                    <Paintbrush className="w-3.5 h-3.5" />
+                  ) : paintConstraintMode === 'islands' ? (
+                    <Lock className="w-3.5 h-3.5" />
+                  ) : (
+                    <Box className="w-3.5 h-3.5" />
+                  )}
                 </IconButton>
               </Tooltip>
             </div>
           </div>
         )}
 
-        {/* Active Island Indicator Pill */}
-        {selectedIsland && (
-          <div
-            className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] border transition-colors shrink-0 ${
-              paintConstraintMode === 'selection'
-                ? 'bg-zinc-900 border-zinc-700 text-zinc-200 font-medium'
-                : 'bg-zinc-900/80 border-zinc-800 text-zinc-400'
-            }`}
-          >
+        {/* Active Mask Indicator Pill: ONLY shown in Islands or Faces mode */}
+        {paintConstraintMode === 'islands' && selectedIsland && (
+          <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] border transition-colors shrink-0 bg-zinc-900 border-zinc-700 text-zinc-200 font-medium">
             <span className="font-mono text-[10px]">
-              {paintConstraintMode === 'selection' ? `Mask #${selectedIsland.id}` : `#${selectedIsland.id}`}
+              Mask #{selectedIsland.id}
             </span>
             <button
               type="button"
               onClick={onClearSelectedIsland}
               className="text-zinc-400 hover:text-white transition-colors"
               title="Clear selected island (Esc)"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </div>
+        )}
+
+        {paintConstraintMode === 'faces' && selectedFaces && selectedFaces.length > 0 && (
+          <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] border transition-colors shrink-0 bg-zinc-900 border-zinc-700 text-zinc-200 font-medium">
+            <span className="font-mono text-[10px]">
+              Mask: {selectedFaces.length} Face{selectedFaces.length > 1 ? 's' : ''}
+            </span>
+            <button
+              type="button"
+              onClick={onClearSelectedFaces}
+              className="text-zinc-400 hover:text-white transition-colors"
+              title="Clear selected faces (Esc)"
             >
               <X className="w-3 h-3" />
             </button>

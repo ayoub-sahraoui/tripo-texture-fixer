@@ -26,6 +26,8 @@ export type ShadingMode = 'textured' | 'wireframe-textured' | 'wireframe-only' |
 
 export type LightingPreset = 'studio' | 'sunlight' | 'soft-ambient';
 
+export type PaintConstraintMode = 'free' | 'islands' | 'faces';
+
 export interface UVPoint {
   u: number;
   v: number;

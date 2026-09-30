@@ -24,6 +24,7 @@ import {
   LightingPreset,
   ColorAdjustmentOptions,
   BlendMode,
+  PaintConstraintMode,
 } from '../../core/types';
 import { Button, IconButton, Badge, Tooltip } from '@/components/ui';
 import * as Slider from '@/components/ui/slider';
@@ -38,8 +39,12 @@ interface PropertiesPanelProps {
   selectedIsland: UVIsland | null;
   onClearSelectedIsland: () => void;
   onFillIsland: () => void;
-  paintConstraintMode: 'free' | 'selection';
-  onChangePaintConstraintMode: (mode: 'free' | 'selection') => void;
+  selectedFaces?: number[];
+  onClearSelectedFaces?: () => void;
+  onFillFaces?: () => void;
+  onSelectIslandFaces?: () => void;
+  paintConstraintMode: PaintConstraintMode;
+  onChangePaintConstraintMode: (mode: PaintConstraintMode) => void;
   showWireframe: boolean;
   onToggleWireframe: () => void;
   wireframeOpacity: number;
@@ -141,6 +146,10 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
   selectedIsland,
   onClearSelectedIsland,
   onFillIsland,
+  selectedFaces = [],
+  onClearSelectedFaces,
+  onFillFaces,
+  onSelectIslandFaces,
   paintConstraintMode,
   onChangePaintConstraintMode,
   showWireframe,
@@ -668,116 +677,217 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
           )}
         </div>
 
-        {/* 3. UV ISLAND MASKING */}
+        {/* 3. UV SELECTION & MASKING */}
         <div className="space-y-2.5 pt-4">
           <div className="flex items-center justify-between">
             <span className="font-semibold text-zinc-200 uppercase text-[11px] tracking-wider flex items-center gap-1.5">
               <Layers className="w-3.5 h-3.5 text-zinc-400" />
-              UV Island Masking
+              UV Selection & Masking
             </span>
-            {selectedIsland && (
+            {paintConstraintMode !== 'free' && (selectedIsland || selectedFaces.length > 0) && (
               <Badge variant="outline" size="sm" className="text-[10px] text-zinc-300 border-zinc-700">
-                Active
+                Active Mask
               </Badge>
             )}
           </div>
 
-          {/* Paint Mode Selection */}
+          {/* Paint Mode Selection: 3-way toggle */}
           <div className="space-y-1.5 bg-zinc-900/50 p-2 rounded border border-zinc-800">
             <div className="flex items-center justify-between">
               <span className="text-[11px] text-zinc-300">Paint Constraint</span>
               <span className="text-[10px] text-zinc-500 font-mono">Key: M</span>
             </div>
-            <div className="grid grid-cols-2 gap-1 p-0.5 bg-zinc-950 rounded border border-zinc-800">
+            <div className="grid grid-cols-3 gap-1 p-0.5 bg-zinc-950 rounded border border-zinc-800">
               <button
                 type="button"
                 onClick={() => onChangePaintConstraintMode('free')}
                 className={`py-1 rounded text-[11px] font-medium transition-colors ${
                   paintConstraintMode === 'free'
-                    ? 'bg-zinc-800 text-zinc-100 border border-zinc-700 shadow-sm'
+                    ? 'bg-zinc-800 text-zinc-100 border border-zinc-700 shadow-sm font-semibold'
                     : 'text-zinc-400 hover:text-zinc-200'
                 }`}
               >
-                Free Mode
+                Free
               </button>
               <button
                 type="button"
-                onClick={() => onChangePaintConstraintMode('selection')}
+                onClick={() => onChangePaintConstraintMode('islands')}
                 className={`py-1 rounded text-[11px] font-medium transition-colors flex items-center justify-center gap-1 ${
-                  paintConstraintMode === 'selection'
+                  paintConstraintMode === 'islands'
                     ? 'bg-zinc-800 text-zinc-100 border border-zinc-600 shadow-sm font-semibold'
                     : 'text-zinc-400 hover:text-zinc-200'
                 }`}
               >
                 <Lock className="w-3 h-3" />
-                <span>On Selection</span>
+                <span>Islands</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onChangePaintConstraintMode('faces')}
+                className={`py-1 rounded text-[11px] font-medium transition-colors flex items-center justify-center gap-1 ${
+                  paintConstraintMode === 'faces'
+                    ? 'bg-zinc-800 text-zinc-100 border border-zinc-600 shadow-sm font-semibold'
+                    : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                <Box className="w-3 h-3" />
+                <span>Faces</span>
               </button>
             </div>
             <p className="text-[10px] text-zinc-500 leading-normal">
               {paintConstraintMode === 'free'
-                ? 'Strokes paint freely across the entire texture with zero boundary clipping.'
-                : selectedIsland
-                ? `Strokes are locked inside Island #${selectedIsland.id} to prevent seam bleeding.`
-                : 'Strokes will lock inside whatever island is selected.'}
+                ? 'Strokes paint freely across all mesh regions with zero boundary clipping.'
+                : paintConstraintMode === 'islands'
+                ? selectedIsland
+                  ? `Strokes are locked inside Island #${selectedIsland.id} to prevent seam bleeding.`
+                  : 'Strokes will lock inside whatever island is selected.'
+                : selectedFaces.length > 0
+                ? `Strokes are locked strictly inside the ${selectedFaces.length} selected face(s).`
+                : 'Click faces in 3D or 2D to select them and constrain painting.'}
             </p>
           </div>
 
-          {selectedIsland ? (
-            <div className="space-y-2 bg-zinc-900/70 p-2.5 rounded-md border border-zinc-700/80">
-              <div className="flex justify-between items-center">
-                <span className="text-zinc-100 font-medium">Island #{selectedIsland.id}</span>
-                <span className="font-mono text-zinc-400">
-                  {selectedIsland.triangleIndices.length} triangles
-                </span>
-              </div>
-              <p className="text-[10px] text-zinc-400 leading-normal">
-                Paint strokes are constrained to this UV region to prevent seam bleeding.
-              </p>
-              <div className="space-y-1 pt-1 border-t border-zinc-800">
-                <div className="flex justify-between items-center text-[10px] text-zinc-400">
-                  <span>UV Line Thickness</span>
-                  <span className="font-mono text-zinc-200 font-semibold">{wireframeLineWidth.toFixed(1)}px</span>
-                </div>
-                <div className="flex gap-1">
-                  {[0.5, 1.0, 1.5, 2.0, 3.0].map((thickness) => (
-                    <button
-                      key={thickness}
-                      type="button"
-                      onClick={() => onChangeWireframeLineWidth(thickness)}
-                      className={`flex-1 py-0.5 rounded text-[9px] font-mono transition-colors border ${
-                        Math.abs(wireframeLineWidth - thickness) < 0.1
-                          ? 'bg-zinc-800 text-zinc-100 border-zinc-600 font-semibold'
-                          : 'bg-zinc-900/60 text-zinc-400 border-zinc-800 hover:text-zinc-200 hover:bg-zinc-800/40'
-                      }`}
-                    >
-                      {thickness}px
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="flex gap-1.5 pt-1">
-                <Button
-                  variant="solid"
-                  size="xs"
-                  onClick={onFillIsland}
-                  className="flex-1 text-[11px] h-6 bg-zinc-800 hover:bg-zinc-700 text-zinc-100"
-                >
-                  Fill Island
-                </Button>
-                <Button
-                  variant="outline"
-                  size="xs"
-                  onClick={onClearSelectedIsland}
-                  className="text-[11px] h-6 px-2 text-zinc-400 hover:text-zinc-200"
-                >
-                  Unmask (Esc)
-                </Button>
-              </div>
+          {/* Mode 1: Free Mode Status */}
+          {paintConstraintMode === 'free' && (
+            <div className="p-2.5 bg-zinc-900/40 rounded border border-zinc-800/80 text-[11px] text-zinc-400 leading-relaxed">
+              <span className="text-zinc-200 font-medium block mb-1">Free Painting Mode</span>
+              Draw freely on any part of the model or texture without selection boundaries or masks.
             </div>
-          ) : (
-            <p className="text-[11px] text-zinc-500 leading-relaxed bg-zinc-900/40 p-2 rounded border border-zinc-800/80">
-              Click any part of the 3D mesh or 2D UV layout to select its island.
-            </p>
+          )}
+
+          {/* Mode 2: Island Selection Card */}
+          {paintConstraintMode === 'islands' && (
+            selectedIsland ? (
+              <div className="space-y-2 bg-zinc-900/70 p-2.5 rounded-md border border-zinc-700/80">
+                <div className="flex justify-between items-center">
+                  <span className="text-zinc-100 font-medium">Island #{selectedIsland.id}</span>
+                  <span className="font-mono text-zinc-400">
+                    {selectedIsland.triangleIndices.length} triangles
+                  </span>
+                </div>
+                <p className="text-[10px] text-zinc-400 leading-normal">
+                  Paint strokes are constrained to this UV region to prevent seam bleeding.
+                </p>
+                <div className="space-y-1 pt-1 border-t border-zinc-800">
+                  <div className="flex justify-between items-center text-[10px] text-zinc-400">
+                    <span>UV Line Thickness</span>
+                    <span className="font-mono text-zinc-200 font-semibold">{wireframeLineWidth.toFixed(1)}px</span>
+                  </div>
+                  <div className="flex gap-1">
+                    {[0.5, 1.0, 1.5, 2.0, 3.0].map((thickness) => (
+                      <button
+                        key={thickness}
+                        type="button"
+                        onClick={() => onChangeWireframeLineWidth(thickness)}
+                        className={`flex-1 py-0.5 rounded text-[9px] font-mono transition-colors border ${
+                          Math.abs(wireframeLineWidth - thickness) < 0.1
+                            ? 'bg-zinc-800 text-zinc-100 border-zinc-600 font-semibold'
+                            : 'bg-zinc-900/60 text-zinc-400 border-zinc-800 hover:text-zinc-200 hover:bg-zinc-800/40'
+                        }`}
+                      >
+                        {thickness}px
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex gap-1.5 pt-1">
+                  <Button
+                    variant="solid"
+                    size="xs"
+                    onClick={onFillIsland}
+                    className="flex-1 text-[11px] h-6 bg-zinc-800 hover:bg-zinc-700 text-zinc-100"
+                  >
+                    Fill Island
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="xs"
+                    onClick={onClearSelectedIsland}
+                    className="text-[11px] h-6 px-2 text-zinc-400 hover:text-zinc-200"
+                  >
+                    Unmask (Esc)
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <p className="text-[11px] text-zinc-500 leading-relaxed bg-zinc-900/40 p-2 rounded border border-zinc-800/80">
+                Click any part of the 3D mesh or 2D UV layout to select its island.
+              </p>
+            )
+          )}
+
+          {/* Mode 3: Faces Selection Card */}
+          {paintConstraintMode === 'faces' && (
+            selectedFaces.length > 0 ? (
+              <div className="space-y-2 bg-zinc-900/70 p-2.5 rounded-md border border-zinc-700/80">
+                <div className="flex justify-between items-center">
+                  <span className="text-zinc-100 font-medium">
+                    {selectedFaces.length} Face{selectedFaces.length > 1 ? 's' : ''} Selected
+                  </span>
+                  <span className="font-mono text-zinc-400 text-[10px]">
+                    Shift+Click to multi-select
+                  </span>
+                </div>
+                <p className="text-[10px] text-zinc-400 leading-normal">
+                  Paint strokes and bucket fills are locked inside these individual polygons.
+                </p>
+                <div className="space-y-1 pt-1 border-t border-zinc-800">
+                  <div className="flex justify-between items-center text-[10px] text-zinc-400">
+                    <span>UV Line Thickness</span>
+                    <span className="font-mono text-zinc-200 font-semibold">{wireframeLineWidth.toFixed(1)}px</span>
+                  </div>
+                  <div className="flex gap-1">
+                    {[0.5, 1.0, 1.5, 2.0, 3.0].map((thickness) => (
+                      <button
+                        key={thickness}
+                        type="button"
+                        onClick={() => onChangeWireframeLineWidth(thickness)}
+                        className={`flex-1 py-0.5 rounded text-[9px] font-mono transition-colors border ${
+                          Math.abs(wireframeLineWidth - thickness) < 0.1
+                            ? 'bg-zinc-800 text-zinc-100 border-zinc-600 font-semibold'
+                            : 'bg-zinc-900/60 text-zinc-400 border-zinc-800 hover:text-zinc-200 hover:bg-zinc-800/40'
+                        }`}
+                      >
+                        {thickness}px
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex gap-1.5 pt-1">
+                  <Button
+                    variant="solid"
+                    size="xs"
+                    onClick={onFillFaces || onFillIsland}
+                    className="flex-1 text-[11px] h-6 bg-zinc-800 hover:bg-zinc-700 text-zinc-100"
+                  >
+                    Fill Faces
+                  </Button>
+                  {onSelectIslandFaces && (
+                    <Button
+                      variant="outline"
+                      size="xs"
+                      onClick={onSelectIslandFaces}
+                      className="text-[11px] h-6 px-2 text-zinc-300 hover:text-white"
+                      title="Select all faces in this island"
+                    >
+                      Expand
+                    </Button>
+                  )}
+                  <Button
+                    variant="outline"
+                    size="xs"
+                    onClick={onClearSelectedFaces}
+                    className="text-[11px] h-6 px-2 text-zinc-400 hover:text-zinc-200"
+                  >
+                    Clear (Esc)
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <p className="text-[11px] text-zinc-500 leading-relaxed bg-zinc-900/40 p-2 rounded border border-zinc-800/80">
+                Click any face on the 3D model or 2D UV wireframe to select it. Hold <span className="font-semibold text-zinc-300">Shift</span> to select multiple faces.
+              </p>
+            )
           )}
         </div>
 
@@ -977,39 +1087,37 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
               </button>
             </div>
 
-            {showWireframe && (
-              <div className="pt-1.5 space-y-1">
-                {/* Opacity */}
-                <div className="flex justify-between text-[10px] text-zinc-400">
-                  <span>Mesh Wireframe Opacity</span>
-                  <span className="font-mono">{Math.round(wireframeOpacity * 100)}%</span>
-                </div>
-                <Slider.Root
-                  size="sm"
-                  value={[wireframeOpacity * 100]}
-                  min={5}
-                  max={100}
-                  step={5}
-                  onValueChange={(d) => onChangeWireframeOpacity(d.value[0] / 100)}
-                  className="w-full flex items-center"
-                >
-                  <Slider.Control className="relative flex items-center w-full h-2.5 cursor-pointer">
-                    <Slider.Track className="relative h-1 w-full rounded-full bg-zinc-800 overflow-hidden">
-                      <Slider.Range className="h-full bg-zinc-400" />
-                    </Slider.Track>
-                    <Slider.Thumb
-                      index={0}
-                      className="w-3 h-3 rounded-full bg-white shadow focus:outline-none"
-                    />
-                  </Slider.Control>
-                </Slider.Root>
+            {/* Opacity */}
+            <div className="pt-1.5 space-y-1">
+              <div className="flex justify-between text-[10px] text-zinc-400">
+                <span>UV Map Opacity (Mesh & Selection)</span>
+                <span className="font-mono">{Math.round(wireframeOpacity * 100)}%</span>
               </div>
-            )}
+              <Slider.Root
+                size="sm"
+                value={[wireframeOpacity * 100]}
+                min={5}
+                max={100}
+                step={5}
+                onValueChange={(d) => onChangeWireframeOpacity(d.value[0] / 100)}
+                className="w-full flex items-center"
+              >
+                <Slider.Control className="relative flex items-center w-full h-2.5 cursor-pointer">
+                  <Slider.Track className="relative h-1 w-full rounded-full bg-zinc-800 overflow-hidden">
+                    <Slider.Range className="h-full bg-zinc-400" />
+                  </Slider.Track>
+                  <Slider.Thumb
+                    index={0}
+                    className="w-3 h-3 rounded-full bg-white shadow focus:outline-none"
+                  />
+                </Slider.Control>
+              </Slider.Root>
+            </div>
 
-            {/* Line Thickness (Controls both Selected Island and Mesh Wireframe) */}
+            {/* Line Thickness (Controls both Selection and Mesh Wireframe) */}
             <div className="space-y-1.5 pt-1 border-t border-zinc-800/60">
               <div className="flex justify-between text-[10px] text-zinc-400">
-                <span>UV Line Thickness {selectedIsland ? '(Selected & Mesh)' : ''}</span>
+                <span>UV Line Thickness (Mesh & Selection)</span>
                 <span className="font-mono text-zinc-300 font-semibold">{wireframeLineWidth.toFixed(1)}px</span>
               </div>
               <Slider.Root

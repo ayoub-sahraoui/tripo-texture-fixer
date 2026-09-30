@@ -7,13 +7,18 @@ import {
   ModelData,
   LightingPreset,
   ColorAdjustmentOptions,
+  PaintConstraintMode,
 } from './core/types';
 import { PaintEngine } from './core/paintEngine';
 import {
   loadModelFile,
   exportGLB,
 } from './core/modelLoader';
-import { findIslandAtUV, createIslandPath2D } from './core/uvAnalyzer';
+import {
+  findIslandAtUV,
+  createIslandPath2D,
+  createFacesPath2D,
+} from './core/uvAnalyzer';
 import { HeaderBar } from './components/layout/HeaderBar';
 import { StatusBar } from './components/layout/StatusBar';
 import { ThreeViewport } from './components/viewport/ThreeViewport';
@@ -43,9 +48,10 @@ export const App: React.FC = () => {
     '#18181b',
   ]);
 
-  // UV Island Selection & Overlays
+  // UV Island Selection, Faces Selection & Overlays
   const [selectedIsland, setSelectedIsland] = useState<UVIsland | null>(null);
-  const [paintConstraintMode, setPaintConstraintMode] = useState<'free' | 'selection'>('selection');
+  const [selectedFaces, setSelectedFaces] = useState<number[]>([]);
+  const [paintConstraintMode, setPaintConstraintMode] = useState<PaintConstraintMode>('islands');
   const [showWireframe, setShowWireframe] = useState<boolean>(true);
   const [wireframeOpacity, setWireframeOpacity] = useState<number>(0.65);
   const [wireframeLineWidth, setWireframeLineWidth] = useState<number>(1.0);
@@ -85,6 +91,7 @@ export const App: React.FC = () => {
   const initModelWithEngine = (data: ModelData) => {
     setModelData(data);
     setSelectedIsland(null);
+    setSelectedFaces([]);
 
     const engine = new PaintEngine(
       data.textureCanvas.width,
@@ -164,8 +171,15 @@ export const App: React.FC = () => {
           break;
         case 'm':
           setPaintConstraintMode((prev) => {
-            const next = prev === 'free' ? 'selection' : 'free';
-            setStatusMessage(`Paint Mode: ${next === 'free' ? 'Free (Unrestricted)' : 'On Selection'}`);
+            const next: PaintConstraintMode =
+              prev === 'free' ? 'islands' : prev === 'islands' ? 'faces' : 'free';
+            const label =
+              next === 'free'
+                ? 'Free (Unrestricted Painting)'
+                : next === 'islands'
+                ? 'Islands Masking'
+                : 'Faces Masking';
+            setStatusMessage(`Paint Mode: ${label}`);
             return next;
           });
           break;
@@ -177,6 +191,7 @@ export const App: React.FC = () => {
           break;
         case 'escape':
           handleClearSelectedIsland();
+          handleClearSelectedFaces();
           break;
       }
     };
@@ -185,11 +200,11 @@ export const App: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [paintEngine]);
 
-  // Synchronize PaintEngine active mask with selectedIsland and paintConstraintMode
+  // Synchronize PaintEngine active mask with selectedIsland / selectedFaces and paintConstraintMode
   useEffect(() => {
     if (!paintEngine || !modelData) return;
 
-    if (paintConstraintMode === 'selection' && selectedIsland) {
+    if (paintConstraintMode === 'islands' && selectedIsland) {
       const mask = createIslandPath2D(
         selectedIsland,
         modelData.uvAnalysis.triangles,
@@ -198,17 +213,30 @@ export const App: React.FC = () => {
       );
       paintEngine.setActiveMask(mask);
       setStatusMessage(
-        `On Selection Mode: Island #${selectedIsland.id} masked (${selectedIsland.triangleIndices.length} triangles)`
+        `Islands Mode: Island #${selectedIsland.id} masked (${selectedIsland.triangleIndices.length} triangles)`
+      );
+    } else if (paintConstraintMode === 'faces' && selectedFaces.length > 0) {
+      const mask = createFacesPath2D(
+        selectedFaces,
+        modelData.uvAnalysis.triangles,
+        paintEngine.getWidth(),
+        paintEngine.getHeight()
+      );
+      paintEngine.setActiveMask(mask);
+      setStatusMessage(
+        `Faces Mode: ${selectedFaces.length} face(s) masked`
       );
     } else {
       paintEngine.setActiveMask(null);
-      if (selectedIsland) {
-        setStatusMessage(`Free Mode: Island #${selectedIsland.id} highlighted (unrestricted painting)`);
+      if (paintConstraintMode === 'free') {
+        setStatusMessage('Free Mode: Unrestricted painting on all mesh regions');
+      } else if (paintConstraintMode === 'islands') {
+        setStatusMessage('Islands Mode: Select an island to constrain paint');
       } else {
-        setStatusMessage('Free Mode (Unrestricted painting)');
+        setStatusMessage('Faces Mode: Select face(s) to constrain paint');
       }
     }
-  }, [paintEngine, modelData, selectedIsland, paintConstraintMode]);
+  }, [paintEngine, modelData, selectedIsland, selectedFaces, paintConstraintMode]);
 
   const handleSelectIsland = useCallback((island: UVIsland | null) => {
     setSelectedIsland(island);
@@ -217,6 +245,40 @@ export const App: React.FC = () => {
   const handleClearSelectedIsland = () => {
     setSelectedIsland(null);
   };
+
+  const handleSelectFace = useCallback((faceIndex: number, multiSelect = false) => {
+    if (faceIndex < 0) {
+      setSelectedFaces([]);
+      return;
+    }
+    setSelectedFaces((prev) => {
+      if (multiSelect) {
+        if (prev.includes(faceIndex)) {
+          return prev.filter((f) => f !== faceIndex);
+        } else {
+          return [...prev, faceIndex];
+        }
+      } else {
+        return [faceIndex];
+      }
+    });
+  }, []);
+
+  const handleClearSelectedFaces = useCallback(() => {
+    setSelectedFaces([]);
+  }, []);
+
+  const handleSelectIslandFaces = useCallback(() => {
+    if (!modelData || selectedFaces.length === 0) return;
+    const firstFace = selectedFaces[0];
+    const tri = modelData.uvAnalysis.triangles[firstFace];
+    if (!tri) return;
+    const island = modelData.uvAnalysis.islands.get(tri.islandId);
+    if (island) {
+      setSelectedFaces([...island.triangleIndices]);
+      setStatusMessage(`Selected all ${island.triangleIndices.length} faces in Island #${island.id}`);
+    }
+  }, [modelData, selectedFaces]);
 
   // 3D Model Raycast Picking: User clicked on 3D face
   const handlePickUVFrom3D = useCallback(
@@ -259,11 +321,17 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleFillIsland = () => {
-    if (paintEngine && selectedIsland) {
-      paintEngine.fillIsland(brushSettings.color, brushSettings.opacity);
+  const handleFillSelection = () => {
+    if (paintEngine) {
+      paintEngine.fillSelection(brushSettings.color, brushSettings.opacity);
       bumpHistory();
-      setStatusMessage(`Filled Island #${selectedIsland.id}`);
+      if (paintConstraintMode === 'islands' && selectedIsland) {
+        setStatusMessage(`Filled Island #${selectedIsland.id}`);
+      } else if (paintConstraintMode === 'faces' && selectedFaces.length > 0) {
+        setStatusMessage(`Filled ${selectedFaces.length} face(s)`);
+      } else {
+        setStatusMessage('Filled paint canvas');
+      }
     }
   };
 
@@ -440,6 +508,8 @@ export const App: React.FC = () => {
         onClearPaint={handleClearPaint}
         selectedIsland={selectedIsland}
         onClearSelectedIsland={handleClearSelectedIsland}
+        selectedFaces={selectedFaces}
+        onClearSelectedFaces={handleClearSelectedFaces}
         paintConstraintMode={paintConstraintMode}
         onChangePaintConstraintMode={setPaintConstraintMode}
         showWireframe={showWireframe}
@@ -470,6 +540,8 @@ export const App: React.FC = () => {
                 activeTool={activeTool}
                 brushSettings={brushSettings}
                 selectedIsland={selectedIsland}
+                selectedFaces={selectedFaces}
+                onSelectFace={handleSelectFace}
                 paintConstraintMode={paintConstraintMode}
                 onPickUV={handlePickUVFrom3D}
                 onPickColor={handlePickColor}
@@ -479,6 +551,8 @@ export const App: React.FC = () => {
                 autoRotate={autoRotate}
                 onStrokeEnd={bumpHistory}
                 wireframeLineWidth={wireframeLineWidth}
+                wireframeOpacity={wireframeOpacity}
+                showWireframe={showWireframe}
               />
             </Splitter.Panel>
 
@@ -493,8 +567,11 @@ export const App: React.FC = () => {
                   paintEngine={paintEngine}
                   activeTool={activeTool}
                   brushSettings={brushSettings}
+                  paintConstraintMode={paintConstraintMode}
                   selectedIsland={selectedIsland}
                   onSelectIsland={handleSelectIsland}
+                  selectedFaces={selectedFaces}
+                  onSelectFace={handleSelectFace}
                   showWireframe={showWireframe}
                   onToggleWireframe={() => setShowWireframe(!showWireframe)}
                   wireframeOpacity={wireframeOpacity}
@@ -525,7 +602,11 @@ export const App: React.FC = () => {
           onSelectColor={handleSelectColor}
           selectedIsland={selectedIsland}
           onClearSelectedIsland={handleClearSelectedIsland}
-          onFillIsland={handleFillIsland}
+          onFillIsland={handleFillSelection}
+          selectedFaces={selectedFaces}
+          onClearSelectedFaces={handleClearSelectedFaces}
+          onFillFaces={handleFillSelection}
+          onSelectIslandFaces={handleSelectIslandFaces}
           paintConstraintMode={paintConstraintMode}
           onChangePaintConstraintMode={setPaintConstraintMode}
           showWireframe={showWireframe}

@@ -81,6 +81,7 @@ export class PaintEngine {
 
   private activeMaskPath: Path2D | null = null;
   private onTextureUpdate?: (canvas: HTMLCanvasElement) => void;
+  private listeners = new Set<(canvas: HTMLCanvasElement) => void>();
 
   constructor(
     width: number,
@@ -118,12 +119,21 @@ export class PaintEngine {
     this.smudgeCtx = this.smudgeCanvas.getContext('2d', { willReadFrequently: true })!;
 
     if (initialImage) {
-      this.setBaseImage(initialImage);
+      this.baseCtx.drawImage(initialImage, 0, 0, width, height);
     } else {
-      this.clearBaseWithColor('#808080');
+      this.baseCtx.fillStyle = '#808080';
+      this.baseCtx.fillRect(0, 0, width, height);
     }
 
     this.saveState();
+    this.updateOutput(false);
+  }
+
+  public subscribe(listener: (canvas: HTMLCanvasElement) => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
   }
 
   public getOutputCanvas(): HTMLCanvasElement {
@@ -155,28 +165,37 @@ export class PaintEngine {
     this.stampCache.clear();
     this.undoStack = [];
     this.redoStack = [];
-    this.updateOutput();
+    this.saveState();
+    this.updateOutput(false);
   }
 
   public setBaseImage(source: CanvasImageSource): void {
     this.baseCtx.clearRect(0, 0, this.width, this.height);
     this.baseCtx.drawImage(source, 0, 0, this.width, this.height);
-    this.clearPaintLayer();
-    this.updateOutput();
+    this.paintCtx.clearRect(0, 0, this.width, this.height);
+    this.strokeCtx.clearRect(0, 0, this.width, this.height);
+    this.undoStack = [];
+    this.redoStack = [];
+    this.saveState();
+    this.updateOutput(false);
   }
 
   public clearBaseWithColor(color: string): void {
     this.baseCtx.fillStyle = color;
     this.baseCtx.fillRect(0, 0, this.width, this.height);
-    this.clearPaintLayer();
-    this.updateOutput();
+    this.paintCtx.clearRect(0, 0, this.width, this.height);
+    this.strokeCtx.clearRect(0, 0, this.width, this.height);
+    this.undoStack = [];
+    this.redoStack = [];
+    this.saveState();
+    this.updateOutput(false);
   }
 
   public clearPaintLayer(): void {
-    this.saveState();
     this.paintCtx.clearRect(0, 0, this.width, this.height);
     this.strokeCtx.clearRect(0, 0, this.width, this.height);
-    this.updateOutput();
+    this.saveState();
+    this.updateOutput(false);
   }
 
   public setActiveMask(mask: Path2D | null): void {
@@ -209,6 +228,9 @@ export class PaintEngine {
     if (this.onTextureUpdate) {
       this.onTextureUpdate(this.outputCanvas);
     }
+    for (const listener of this.listeners) {
+      listener(this.outputCanvas);
+    }
   }
 
   private saveState(): void {
@@ -239,7 +261,7 @@ export class PaintEngine {
       this.paintCtx.putImageData(prev.paint, 0, 0);
       this.baseCtx.putImageData(prev.base, 0, 0);
       this.strokeCtx.clearRect(0, 0, this.width, this.height);
-      this.updateOutput();
+      this.updateOutput(false);
     }
   }
 
@@ -250,7 +272,7 @@ export class PaintEngine {
     this.paintCtx.putImageData(next.paint, 0, 0);
     this.baseCtx.putImageData(next.base, 0, 0);
     this.strokeCtx.clearRect(0, 0, this.width, this.height);
-    this.updateOutput();
+    this.updateOutput(false);
   }
 
   /**
@@ -405,9 +427,6 @@ export class PaintEngine {
     if (!this.isDrawing) return;
     this.isDrawing = false;
 
-    // Save previous state for undo before committing
-    this.saveState();
-
     // Commit active stroke buffer to paintCanvas
     const settings = this.currentSettings;
     if (settings) {
@@ -432,6 +451,9 @@ export class PaintEngine {
     this.strokeCtx.clearRect(0, 0, this.width, this.height);
     this.freehandPoints = [];
     this.strokeStartPos = null;
+
+    // Save committed stroke state for undo
+    this.saveState();
     this.updateOutput(false);
   }
 
@@ -632,43 +654,47 @@ export class PaintEngine {
     return `#${r}${g}${b}`;
   }
 
-  public fillIsland(color: string, opacity = 1): void {
-    if (!this.activeMaskPath) return;
-    this.saveState();
-
+  public fillSelection(color: string, opacity = 1): void {
     this.paintCtx.save();
-    this.paintCtx.clip(this.activeMaskPath);
+    if (this.activeMaskPath) {
+      this.paintCtx.clip(this.activeMaskPath);
+    }
     this.paintCtx.globalAlpha = opacity;
     this.paintCtx.fillStyle = color;
     this.paintCtx.fillRect(0, 0, this.width, this.height);
     this.paintCtx.restore();
 
-    this.updateOutput();
+    this.saveState();
+    this.updateOutput(false);
+  }
+
+  public fillIsland(color: string, opacity = 1): void {
+    this.fillSelection(color, opacity);
   }
 
   // Texture Enhancement Operations (All fully undoable)
   public bleedUVSeams(padding = 8): void {
-    this.saveState();
     dilateUVSeams(this.baseCanvas, padding, this.activeMaskPath);
-    this.updateOutput();
+    this.saveState();
+    this.updateOutput(false);
   }
 
   public sharpenTexture(strength = 1.0): void {
-    this.saveState();
     applySharpen(this.baseCanvas, strength, this.activeMaskPath);
-    this.updateOutput();
+    this.saveState();
+    this.updateOutput(false);
   }
 
   public blurTexture(radius = 2): void {
-    this.saveState();
     applyBlur(this.baseCanvas, radius, this.activeMaskPath);
-    this.updateOutput();
+    this.saveState();
+    this.updateOutput(false);
   }
 
   public adjustColors(options: ColorAdjustmentOptions): void {
-    this.saveState();
     applyColorAdjustments(this.baseCanvas, options, this.activeMaskPath);
-    this.updateOutput();
+    this.saveState();
+    this.updateOutput(false);
   }
 
   public exportImage(format: 'image/png' | 'image/jpeg' = 'image/png'): string {

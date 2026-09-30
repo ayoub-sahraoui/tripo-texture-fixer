@@ -8,6 +8,7 @@ import {
   ToolType,
   BrushSettings,
   UVIsland,
+  PaintConstraintMode,
 } from '../../core/types';
 import { PaintEngine } from '../../core/paintEngine';
 import { findIslandAtUV } from '../../core/uvAnalyzer';
@@ -29,6 +30,8 @@ export interface ThreeViewportProps {
   activeTool?: ToolType;
   brushSettings?: BrushSettings;
   selectedIsland: UVIsland | null;
+  selectedFaces?: number[];
+  onSelectFace?: (faceIndex: number, multiSelect?: boolean) => void;
   onPickUV: (u: number, v: number) => void;
   onPickColor?: (color: string) => void;
   statusCallback?: (msg: string) => void;
@@ -36,8 +39,10 @@ export interface ThreeViewportProps {
   lightingPreset?: LightingPreset;
   autoRotate?: boolean;
   onStrokeEnd?: () => void;
-  paintConstraintMode?: 'free' | 'selection';
+  paintConstraintMode?: PaintConstraintMode;
   wireframeLineWidth?: number;
+  wireframeOpacity?: number;
+  showWireframe?: boolean;
 }
 
 export const ThreeViewport: React.FC<ThreeViewportProps> = ({
@@ -45,13 +50,18 @@ export const ThreeViewport: React.FC<ThreeViewportProps> = ({
   paintEngine,
   activeTool,
   selectedIsland,
+  selectedFaces = [],
+  onSelectFace,
   onPickUV,
   onPickColor,
   statusCallback,
   onOpenModelDialog,
   lightingPreset: propLighting,
   autoRotate: propAutoRotate,
+  paintConstraintMode = 'islands',
   wireframeLineWidth = 1.0,
+  wireframeOpacity = 0.65,
+  showWireframe = true,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -259,7 +269,7 @@ export const ThreeViewport: React.FC<ThreeViewportProps> = ({
     });
     const wfMesh = new THREE.Mesh(modelData.geometry, wfMat);
     wfMesh.name = 'USER_MODEL_WIREFRAME';
-    wfMesh.visible = shadingMode === 'wireframe-textured';
+    wfMesh.visible = showWireframe && shadingMode === 'wireframe-textured';
     modelData.root.add(wfMesh);
     setWireframeMesh(wfMesh);
 
@@ -296,14 +306,14 @@ export const ThreeViewport: React.FC<ThreeViewportProps> = ({
       if (wireframeMesh) wireframeMesh.visible = false;
     } else if (shadingMode === 'wireframe-textured') {
       mesh.material = modelData.material;
-      if (wireframeMesh) wireframeMesh.visible = true;
+      if (wireframeMesh) wireframeMesh.visible = showWireframe;
     } else {
       mesh.material = modelData.material;
       if (wireframeMesh) wireframeMesh.visible = false;
     }
-  }, [shadingMode, modelData, wireframeMesh]);
+  }, [shadingMode, modelData, wireframeMesh, showWireframe]);
 
-  // Synchronize 3D Island Highlight Mesh with selectedIsland
+  // Synchronize 3D Island & Face Highlight Mesh with selectedIsland / selectedFaces
   useEffect(() => {
     if (!modelData) return;
 
@@ -329,7 +339,19 @@ export const ThreeViewport: React.FC<ThreeViewportProps> = ({
 
     cleanupHighlight();
 
-    if (!selectedIsland || !selectedIsland.triangleIndices || selectedIsland.triangleIndices.length === 0) {
+    // In Free mode: selection makes no sense, render no highlight
+    if (paintConstraintMode === 'free') {
+      return;
+    }
+
+    let triangleIndices: number[] = [];
+    if (paintConstraintMode === 'islands' && selectedIsland?.triangleIndices) {
+      triangleIndices = selectedIsland.triangleIndices;
+    } else if (paintConstraintMode === 'faces' && selectedFaces && selectedFaces.length > 0) {
+      triangleIndices = selectedFaces;
+    }
+
+    if (triangleIndices.length === 0) {
       return;
     }
 
@@ -339,7 +361,6 @@ export const ThreeViewport: React.FC<ThreeViewportProps> = ({
 
     const indexAttr = geometry.index;
     const normAttr = geometry.attributes.normal;
-    const triangleIndices = selectedIsland.triangleIndices;
     const triCount = triangleIndices.length;
 
     const positions = new Float32Array(triCount * 9);
@@ -405,11 +426,11 @@ export const ThreeViewport: React.FC<ThreeViewportProps> = ({
     const highlightGroup = new THREE.Group();
     highlightGroup.name = 'USER_ISLAND_HIGHLIGHT';
 
-    // Translucent white fill
+    // Translucent white fill modulated by wireframeOpacity
     const fillMat = new THREE.MeshBasicMaterial({
       color: 0xffffff,
       transparent: true,
-      opacity: 0.25,
+      opacity: Math.max(0.04, Math.min(0.35, wireframeOpacity * 0.35)),
       side: THREE.DoubleSide,
       depthTest: true,
       depthWrite: false,
@@ -422,13 +443,13 @@ export const ThreeViewport: React.FC<ThreeViewportProps> = ({
     fillMesh.renderOrder = 10;
     highlightGroup.add(fillMesh);
 
-    // Crisp white wireframe contour lines
+    // Crisp white wireframe contour lines modulated by wireframeOpacity & wireframeLineWidth
     const wireMat = new THREE.MeshBasicMaterial({
       color: 0xffffff,
       wireframe: true,
       wireframeLinewidth: wireframeLineWidth,
       transparent: true,
-      opacity: 0.9,
+      opacity: wireframeOpacity,
       depthTest: true,
       depthWrite: false,
       polygonOffset: true,
@@ -448,7 +469,14 @@ export const ThreeViewport: React.FC<ThreeViewportProps> = ({
     return () => {
       cleanupHighlight();
     };
-  }, [selectedIsland, modelData, wireframeLineWidth]);
+  }, [
+    paintConstraintMode,
+    selectedIsland,
+    selectedFaces,
+    modelData,
+    wireframeLineWidth,
+    wireframeOpacity,
+  ]);
 
   // Raycast helper to find intersection with the 3D model
   const getRaycastHit = useCallback(
@@ -549,7 +577,7 @@ export const ThreeViewport: React.FC<ThreeViewportProps> = ({
       const elapsed = performance.now() - pointerDownPosRef.current.time;
       pointerDownPosRef.current = null;
 
-      // Mouse moved less than 6px within 600ms -> Click to select UV island
+      // Mouse moved less than 6px within 600ms -> Click to select
       if (dist < 6 && elapsed < 600) {
         if (!modelData) return;
 
@@ -568,20 +596,43 @@ export const ThreeViewport: React.FC<ThreeViewportProps> = ({
             return;
           }
 
-          // Select UV island from 3D surface
-          onPickUV(uv.x, uv.y);
-          const island = findIslandAtUV(uv.x, uv.y, modelData.uvAnalysis);
-          if (island) {
-            statusCallback?.(
-              `Selected Island #${island.id} (${island.triangleIndices.length} tris) from 3D view`
-            );
-          } else {
-            statusCallback?.(`Selected UV (${uv.x.toFixed(3)}, ${uv.y.toFixed(3)})`);
+          // In Free mode: selection makes no sense, do not select
+          if (paintConstraintMode === 'free') {
+            return;
+          }
+
+          // In Faces mode: select face
+          if (paintConstraintMode === 'faces') {
+            if (hit.faceIndex !== undefined && hit.faceIndex !== null) {
+              onSelectFace?.(hit.faceIndex, e.shiftKey);
+              statusCallback?.(
+                `${e.shiftKey ? 'Toggled' : 'Selected'} Face #${hit.faceIndex} from 3D view`
+              );
+            }
+            return;
+          }
+
+          // In Islands mode: select UV island
+          if (paintConstraintMode === 'islands') {
+            onPickUV(uv.x, uv.y);
+            const island = findIslandAtUV(uv.x, uv.y, modelData.uvAnalysis);
+            if (island) {
+              statusCallback?.(
+                `Selected Island #${island.id} (${island.triangleIndices.length} tris) from 3D view`
+              );
+            } else {
+              statusCallback?.(`Selected UV (${uv.x.toFixed(3)}, ${uv.y.toFixed(3)})`);
+            }
           }
         } else {
-          // Clicked empty background: deselect island
-          onPickUV(-1, -1);
-          statusCallback?.('Deselected UV Island');
+          // Clicked empty background: deselect
+          if (paintConstraintMode === 'islands') {
+            onPickUV(-1, -1);
+            statusCallback?.('Deselected UV Island');
+          } else if (paintConstraintMode === 'faces') {
+            onSelectFace?.(-1, false);
+            statusCallback?.('Deselected Faces');
+          }
         }
       }
     } else if (!e) {
@@ -601,16 +652,22 @@ export const ThreeViewport: React.FC<ThreeViewportProps> = ({
   };
 
   const handleDoubleClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!modelData) return;
+    if (!modelData || paintConstraintMode === 'free') return;
     const hit = getRaycastHit(e.clientX, e.clientY);
     if (hit && hit.uv) {
-      const island = findIslandAtUV(hit.uv.x, hit.uv.y, modelData.uvAnalysis);
-      onPickUV(hit.uv.x, hit.uv.y);
-      statusCallback?.(
-        island
-          ? `Selected Island #${island.id} (${island.triangleIndices.length} tris)`
-          : `No island at UV (${hit.uv.x.toFixed(2)}, ${hit.uv.y.toFixed(2)})`
-      );
+      if (paintConstraintMode === 'faces') {
+        if (hit.faceIndex !== undefined && hit.faceIndex !== null) {
+          onSelectFace?.(hit.faceIndex, e.shiftKey);
+        }
+      } else if (paintConstraintMode === 'islands') {
+        const island = findIslandAtUV(hit.uv.x, hit.uv.y, modelData.uvAnalysis);
+        onPickUV(hit.uv.x, hit.uv.y);
+        statusCallback?.(
+          island
+            ? `Selected Island #${island.id} (${island.triangleIndices.length} tris)`
+            : `No island at UV (${hit.uv.x.toFixed(2)}, ${hit.uv.y.toFixed(2)})`
+        );
+      }
     }
   };
 
